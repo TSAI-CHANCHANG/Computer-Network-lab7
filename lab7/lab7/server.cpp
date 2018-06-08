@@ -128,15 +128,23 @@ int __cdecl main(void)
 			return 1;
 		}
 
+		SOCKADDR_IN clientInfo = { 0 };
+		int addrsize = sizeof(clientInfo);
 		// Accept a client socket
 		SOCKET ClientSocket = INVALID_SOCKET;
-		ClientSocket = accept(ListenSocket, NULL, NULL);
+		ClientSocket = accept(ListenSocket, (struct sockaddr*)&clientInfo, &addrsize);
 		if (ClientSocket == INVALID_SOCKET) {
 			printf("accept failed with error: %d\n", WSAGetLastError());
 			closesocket(ListenSocket);
 			WSACleanup();
 			return 1;
 		}
+		//get current ip
+		getpeername(ClientSocket, (struct sockaddr*)&clientInfo, &addrsize);
+		char *ip = inet_ntoa(clientInfo.sin_addr);
+		clientInfo.sin_port;
+
+		printf("%s", ip);
 
 		std::thread(func, std::move(ClientSocket)).detach();
 

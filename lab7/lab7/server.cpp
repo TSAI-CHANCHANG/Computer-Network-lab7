@@ -20,6 +20,7 @@
 #pragma comment (lib, "Ws2_32.lib")
 // #pragma comment (lib, "Mswsock.lib")
 
+#define SERVER_NAME "×µÃû¤Þ¤·¤í"
 #define DEFAULT_BUFLEN 512
 #define DEFAULT_PORT "5426"
 class onlineClient

@@ -1,6 +1,7 @@
 #undef UNICODE
 #define _CRT_SECURE_NO_WARNINGS
 #define WIN32_LEAN_AND_MEAN
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #include <windows.h>
 #include <winsock2.h>
@@ -142,9 +143,9 @@ int __cdecl main(void)
 		//get current ip
 		getpeername(ClientSocket, (struct sockaddr*)&clientInfo, &addrsize);
 		char *ip = inet_ntoa(clientInfo.sin_addr);
-		clientInfo.sin_port;
+		printf("port: %d", clientInfo.sin_port);
 
-		printf("%s", ip);
+		printf("ip:%s", ip);
 
 		std::thread(func, std::move(ClientSocket)).detach();
 

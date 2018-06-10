@@ -72,7 +72,8 @@ message: Hello World!
 
 ```c++
 packet-type: 4-S
-response-content:
+response-content: request-index: 1
+message: Hello World!
 ```
 
 `response`：（编号不存在，可能是输入错误或对方已断线）

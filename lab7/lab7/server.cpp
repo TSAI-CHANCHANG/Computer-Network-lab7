@@ -255,6 +255,7 @@ int func(SOCKET ClientSocket)
 	//then analysis received packet
 	while (!isShutdown)
 	{
+		ZeroMemory(recvbuf, DEFAULT_BUFLEN);
 		iResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
 		printf("port: %d\n", clientInfo.sin_port);
 		printf("ip:%s\n", IP);

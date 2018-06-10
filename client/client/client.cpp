@@ -1,4 +1,5 @@
 #define WIN32_LEAN_AND_MEAN
+#define _CRT_SECURE_NO_WARNINGS
 
 #include <windows.h>
 #include <winsock2.h>
@@ -10,7 +11,6 @@
 #include <streambuf> 
 #include <fstream>
 #include <string>
-#include <thread>
 #include <map>
 #include <mutex>
 #include <ctime>
@@ -26,83 +26,109 @@
 #define DEFAULT_BUFLEN 512
 #define DEFAULT_PORT "5426"
 #define TEST_PACKET_CONTENT "packet-type: 4-Receive\nrequest-content: from-index: 0\nmessage: Hello World!"
-class onlineClient
-{
-private:
-	char *IP;
-	int port;
-public:
-	onlineClient(char *currentIP, int currentPort) : IP(currentIP), port(currentPort) {}
-	~onlineClient() {}
-	char *getIP()
-	{
-		return IP;
-	}
-	int getPort()
-	{
-		return port;
-	}
-};
-std::map<int, onlineClient*> onlineClientList;
-std::mutex mt;
-int currentFreeIndex = 0;
-
-bool isAlive(char *IP, int port)
-{
-	bool flag = false;
-	mt.lock();
-	std::map<int, onlineClient*>::iterator iter;
-	iter = onlineClientList.begin();
-	while (iter != onlineClientList.end())
-	{
-		if (strcmp(iter->second->getIP(), IP) == 0 &&
-			iter->second->getPort() == port)
-		{
-			flag = true;
-			break;
-		}
-		iter++;
-	}
-	mt.unlock();
-
-	if (flag)
-		return true;
-	else
-		return false;
-}
-std::string listCurrentAliveClient()
-{
-	std::string content;
-
-	mt.lock();
-	std::map<int, onlineClient*>::iterator iter;
-	iter = onlineClientList.begin();
-	while (iter != onlineClientList.end())
-	{
-		content += std::to_string(iter->first);
-		content += ' ';
-		content += iter->second->getIP();
-		content += ' ';
-		content += std::to_string(iter->second->getPort());
-		content += '\n';
-		iter++;
-	}
-	mt.unlock();
-
-	return content;
-}
+std::mutex mtx_time;
+std::mutex mtx_name;
+std::mutex mtx_list;
+std::mutex mtx_message;
+std::mutex mtx_output;
+std::condition_variable Time;
+std::condition_variable name;
+std::condition_variable list;
+std::condition_variable message;
 int func(SOCKET ConnectSocket)
 {
 	char recvbuf[DEFAULT_BUFLEN];
 	int iResult;
 	int recvbuflen = DEFAULT_BUFLEN;
 	do {
-
+		ZeroMemory(recvbuf, DEFAULT_BUFLEN);
 		iResult = recv(ConnectSocket, recvbuf, recvbuflen, 0);
 		if (iResult > 0)
 		{
-			printf("Bytes received: %d\n", iResult);
-			printf("content: %s\n", recvbuf);
+			std::string recvPacket = recvbuf;
+			std::string packetType;
+			std::string responseContent;
+			size_t pos = 0;
+			pos = recvPacket.find(" ") + 1;
+			size_t nextPos = 0;
+			//get packet type
+			nextPos = recvPacket.find("\n", pos);
+			packetType = recvPacket.substr(pos, nextPos - pos);
+			//get request-content type
+			pos = recvPacket.find("response-content:");
+			nextPos = recvPacket.find(" ", pos);
+			if (nextPos == -1)
+				responseContent = "";
+			else
+				responseContent = recvPacket.substr(nextPos + 1);
+			if (packetType.compare("1") == 0)
+			{
+				mtx_output.lock();
+				std::cout << responseContent << std::endl;
+				mtx_output.unlock();
+				Time.notify_one();
+			}
+			else if (packetType.compare("2") == 0)
+			{
+				mtx_output.lock();
+				std::cout << responseContent << std::endl;
+				mtx_output.unlock();
+				name.notify_one();
+			}
+			else if (packetType.compare("3") == 0)
+			{
+				mtx_output.lock();
+				std::cout << responseContent << std::endl;
+				mtx_output.unlock();
+				list.notify_one();
+			}
+			else if (packetType.compare("4-S") == 0)
+			{
+				int requestIndex;
+				pos = recvPacket.find("request-index:");
+				nextPos = recvPacket.find(" ", pos) + 1;
+				pos = recvPacket.find("\n", nextPos);
+				requestIndex = stoi(recvPacket.substr(nextPos, pos - nextPos));
+				
+				pos = recvPacket.find("message:");
+				nextPos = recvPacket.find(" ", pos) + 1;
+				std::string sendMessage = recvPacket.substr(nextPos);
+
+				mtx_output.lock();
+				std::cout << "the message has been sent to" << std::to_string(requestIndex) << std::endl;
+				mtx_output.unlock();
+				message.notify_one();
+			}
+			else if (packetType.compare("4-F-not-exist") == 0)
+			{
+				mtx_output.lock();
+				std::cout << "This client doesn't exist or it has logged out" << std::endl;
+				mtx_output.unlock();
+				message.notify_one();
+			}
+			else if (packetType.compare("message") == 0)
+			{
+				int fromIndex;
+				pos = recvPacket.find("from: ");
+				nextPos = recvPacket.find(" ", pos) + 1;
+				pos = recvPacket.find("\n", nextPos);
+				fromIndex = stoi(recvPacket.substr(nextPos, pos - nextPos));
+
+				std::string receiveMessage = recvPacket.substr(pos + 1);
+
+				mtx_output.lock();
+				std::cout << "Message from " << std::to_string(fromIndex) << std::endl;
+				std::cout << receiveMessage << std::endl;
+				mtx_output.unlock();
+				
+				std::string sendMessage = "packet-type: 4-Receive\nrequest-content: from-index: ";
+				sendMessage += std::to_string(fromIndex);
+				sendMessage += '\n';
+				sendMessage += "message: ";
+				sendMessage += receiveMessage;
+				send(ConnectSocket, sendMessage.c_str(), sendMessage.size(), 0);
+
+			}
 		}
 		else if (iResult == 0)
 			printf("Connection closed\n");
@@ -114,33 +140,12 @@ int func(SOCKET ConnectSocket)
 }
 int __cdecl main(void)
 {
-	onlineClient *first = new onlineClient("10.0.0.1", 1);
-	onlineClient *second = new onlineClient("10.0.0.2", 2);
-	onlineClientList.insert(std::make_pair(0, first));
-	onlineClientList.insert(std::make_pair(1, second));
-	std::cout << listCurrentAliveClient() << std::endl;
-	using std::chrono::system_clock;
-
-	std::chrono::duration<int, std::ratio<60 * 60 * 24> > one_day(1);
-
-	system_clock::time_point today = system_clock::now();
-	system_clock::time_point tomorrow = today + one_day;
-
-	std::time_t tt;
-
-	tt = system_clock::to_time_t(today);
-	std::cout << "today is: " << ctime(&tt);
-
-	tt = system_clock::to_time_t(tomorrow);
-	std::cout << "tomorrow will be: " << ctime(&tt);
-
 	WSADATA wsaData;
 	SOCKET ConnectSocket = INVALID_SOCKET;
 	struct addrinfo *result = NULL,
 		*ptr = NULL,
 		hints;
-	char sendbuf[DEFAULT_BUFLEN];;
-	char recvbuf[DEFAULT_BUFLEN];
+	char sendbuf[DEFAULT_BUFLEN];
 	int iResult;
 	int recvbuflen = DEFAULT_BUFLEN;
 	char ip[DEFAULT_BUFLEN];;
@@ -211,7 +216,7 @@ int __cdecl main(void)
 					printf("Connection succeed!\n");
 					std::thread(func, std::move(ConnectSocket)).detach();
 					while (1) {
-						printf("Please input the operation number:\n1.close the connect\n2.get the server time\n3.get the server name\n4.get the client list\n5.send a message\n6.exit");
+						printf("Please input the operation number:\n1.close the connect\n2.get the server time\n3.get the server name\n4.get the client list\n5.send a message\n6.exit\n");
 						int a;
 						scanf("%d", &a);
 						if (a == 1) {
@@ -222,9 +227,11 @@ int __cdecl main(void)
 								WSACleanup();
 								break;
 							}
+							break;
 						}
 						else if (a == 2) {
-							memcpy(sendbuf, TEST_PACKET_CONTENT, sizeof(TEST_PACKET_CONTENT));
+							std::string packet = "packet-type: 1\nrequest-content:";
+							memcpy(sendbuf, packet.c_str(), packet.size());
 							iResult = send(ConnectSocket, sendbuf, (int)strlen(sendbuf), 0);
 							if (iResult == SOCKET_ERROR) {
 								printf("send failed with error: %d\n", WSAGetLastError());
@@ -232,11 +239,13 @@ int __cdecl main(void)
 								WSACleanup();
 								break;
 							}
-							printf("Bytes Sent: %ld\n", iResult);
+							std::unique_lock<std::mutex> lck(mtx_time);
+							Time.wait(lck);
 							continue;
 						}
 						else if (a == 3) {
-							memcpy(sendbuf, "name", sizeof("name"));
+							std::string packet = "packet-type: 2\nrequest-content:";
+							memcpy(sendbuf, packet.c_str(), packet.size());
 							iResult = send(ConnectSocket, sendbuf, (int)strlen(sendbuf), 0);
 							if (iResult == SOCKET_ERROR) {
 								printf("send failed with error: %d\n", WSAGetLastError());
@@ -244,10 +253,13 @@ int __cdecl main(void)
 								WSACleanup();
 								break;
 							}
-							printf("Bytes Sent: %ld\n", iResult);
+							std::unique_lock<std::mutex> lck(mtx_name);
+							name.wait(lck);
+							continue;
 						}
 						else if (a == 4) {
-							memcpy(sendbuf, "list", sizeof("list"));
+							std::string packet = "packet-type: 3\nrequest-content:";
+							memcpy(sendbuf, packet.c_str(), packet.size()); 
 							iResult = send(ConnectSocket, sendbuf, (int)strlen(sendbuf), 0);
 							if (iResult == SOCKET_ERROR) {
 								printf("send failed with error: %d\n", WSAGetLastError());
@@ -255,13 +267,24 @@ int __cdecl main(void)
 								WSACleanup();
 								break;
 							}
-							printf("Bytes Sent: %ld\n", iResult);
+							std::unique_lock<std::mutex> lck(mtx_list);
+							list.wait(lck);
+							continue;
 						}
 						else if (a == 5) {
-							char message[255];
-							printf("please input the message:\n");
-							scanf("%s", message);
-							memcpy(sendbuf, message, sizeof(message));
+							std::string sendMessage;
+							int dstIndex = 0;
+							std::cout << "please input the dst index:" << std::endl;
+							std::cin >> dstIndex;
+							std::cout << "please input the message:" << std::endl;
+							std::cin >> sendMessage;
+							std::string packet = "packet-type: 4-Send\nrequest-content: request-index: ";
+							packet += std::to_string(dstIndex);
+							packet += '\n';
+							packet += "message: ";
+							packet += sendMessage;
+							ZeroMemory(sendbuf, DEFAULT_BUFLEN);
+							memcpy(sendbuf, packet.c_str(), packet.size());
 							iResult = send(ConnectSocket, sendbuf, (int)strlen(sendbuf), 0);
 							if (iResult == SOCKET_ERROR) {
 								printf("send failed with error: %d\n", WSAGetLastError());
@@ -269,7 +292,9 @@ int __cdecl main(void)
 								WSACleanup();
 								break;
 							}
-							printf("Bytes Sent: %ld\n", iResult);
+							std::unique_lock<std::mutex> lck(mtx_message);
+							message.wait(lck);
+							continue;
 						}
 						else if (a == 6) {
 							printf("Good bye!\n");

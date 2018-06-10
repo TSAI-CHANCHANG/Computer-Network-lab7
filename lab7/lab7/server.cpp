@@ -56,7 +56,7 @@ std::string dealWithReceivePacket(char recvbuf[], int recvbuflen)
 	int pos = 0;
 	pos = recvPacket.find(" ");
 	int nextPos = 0;
-	nextPos = recvPacket.find(" ", pos + 1);
+	nextPos = recvPacket.find("\n", pos + 1);
 	packetType = recvPacket.substr(pos, nextPos - pos);
 
 	return response;

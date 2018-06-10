@@ -16,6 +16,10 @@
 #include <thread>
 #include <map>
 #include <mutex>
+#include <ctime>
+#include <ratio>
+#include <chrono>
+
 // Need to link with Ws2_32.lib
 #pragma comment (lib, "Ws2_32.lib")
 #pragma comment (lib, "Mswsock.lib")
@@ -47,6 +51,8 @@ public:
 std::map<int, onlineClient*> onlineClientList;
 std::mutex mt;
 int currentFreeIndex = 0;
+bool isAlive(char *IP, int port);
+std::string listCurrentAliveClient();
 std::string dealWithReceivePacket(char recvbuf[], int recvbuflen)
 {
 	std::string recvPacket = recvbuf;
@@ -54,17 +60,45 @@ std::string dealWithReceivePacket(char recvbuf[], int recvbuflen)
 	std::string requestContent;
 	std::string response;
 	int pos = 0;
-	pos = recvPacket.find(" ");
+	pos = recvPacket.find(" ") + 1;
 	int nextPos = 0;
-	nextPos = recvPacket.find("\n", pos + 1);
-	packetType = recvPacket.substr(pos + 1, nextPos - pos);
+	//get packet type
+	nextPos = recvPacket.find("\n", pos);
+	packetType = recvPacket.substr(pos, nextPos - pos);
+	//get request-content type
 	pos = recvPacket.find("request-content:");
 	nextPos = recvPacket.find(" ", pos);
 	if (nextPos == -1)
 		requestContent = "";
 	else
-	{
 		requestContent = recvPacket.substr(nextPos + 1);
+	//now we can decide what we send
+	if (packetType.compare("1") == 0)//get time
+	{
+		response += "packet-type: 1\nresponse-content: ";
+		using std::chrono::system_clock;
+		system_clock::time_point today = system_clock::now();
+		std::time_t tt;
+		tt = system_clock::to_time_t(today);
+		response += ctime(&tt);
+	}
+	else if (packetType.compare("2") == 0)//get name
+	{
+		response += "packet-type: 2\nresponse-content: ";
+		response += SERVER_NAME;
+	}
+	else if (packetType.compare("3") == 0)//get list
+	{
+		response += "packet-type: 3\nresponse-content: ";
+		response += listCurrentAliveClient();
+	}
+	else if (packetType.compare("4") == 0)//get message
+	{
+		response += "packet-type: 4\nresponse-content: ";
+	}
+	else//wrong
+	{
+		response += "packet-type: 5\nresponse-content: ";
 	}
 	return response;
 }
@@ -151,7 +185,8 @@ int func(SOCKET ClientSocket)
 		printf("received content: %s\n", recvbuf);
 		if (iResult > 0) {
 			std::string content = dealWithReceivePacket(recvbuf, recvbuflen);
-			memcpy(sendbuf, content.c_str(), sizeof("content.c_str()"));
+			ZeroMemory(sendbuf, DEFAULT_BUFLEN);
+			memcpy(sendbuf, content.c_str(), content.size());
 			// Echo the buffer back to the sender
 			iSendResult = send(ClientSocket, sendbuf, DEFAULT_BUFLEN, 0);
 			if (iSendResult == SOCKET_ERROR) {

@@ -55,7 +55,15 @@ response-content: 0 10.0.0.1 1
 `request`: （冒号后带一个空格，如果内容要求为空，则不带空格）
 
 ```c
-packet-type: 4
+packet-type: 4-Send
+request-content: request-index: 1
+message: Hello World!
+```
+
+`request`: （成功收到消息）
+
+```c
+packet-type: 4-Receive
 request-content: request-index: 1
 message: Hello World!
 ```

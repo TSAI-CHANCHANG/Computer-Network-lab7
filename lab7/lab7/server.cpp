@@ -23,6 +23,8 @@
 #define SERVER_NAME "×µÃû¤Þ¤·¤í"
 #define DEFAULT_BUFLEN 512
 #define DEFAULT_PORT "5426"
+
+#define DEBUG
 class onlineClient
 {
 private:
@@ -43,7 +45,20 @@ public:
 std::map<int, onlineClient*> onlineClientList;
 std::mutex mt;
 int currentFreeIndex = 0;
+std::string dealWithReceivePacket(char recvbuf[], int recvbuflen)
+{
+	std::string recvPacket = recvbuf;
+	std::string packetType;
+	std::string requestContent;
+	std::string response;
+	int pos = 0;
+	pos = recvPacket.find(" ");
+	int nextPos = 0;
+	nextPos = recvPacket.find(" ", pos + 1);
+	packetType = recvPacket.substr(pos, nextPos - pos);
 
+	return response;
+}
 bool isAlive(char *IP, int port)
 {
 	bool flag = false;
@@ -99,7 +114,16 @@ int func(SOCKET ClientSocket)
 	char *IP = NULL;
 	int port = 0;
 	//get information about this client
-
+	SOCKADDR_IN clientInfo = { 0 };
+	int addrsize = sizeof(clientInfo);
+	//get current ip, port
+	getpeername(ClientSocket, (struct sockaddr*)&clientInfo, &addrsize);
+	IP = inet_ntoa(clientInfo.sin_addr);
+	port = clientInfo.sin_port;
+#ifdef DEBUG
+	printf("port: %d\n", clientInfo.sin_port);
+	printf("ip:%s\n", IP);
+#endif
 	//add it to the list
 	onlineClient *thisClient = new onlineClient(IP, port);
 	int thisIndex = 0;
@@ -112,10 +136,13 @@ int func(SOCKET ClientSocket)
 	while (!isShutdown)
 	{
 		iResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
+		printf("port: %d\n", clientInfo.sin_port);
+		printf("ip:%s\n", IP);
 		printf("Bytes received: %d\n", iResult);
 		printf("received content: %s\n", recvbuf);
 		if (iResult > 0) {
-			memcpy(sendbuf, "114514", sizeof("114514"));
+			std::string content = dealWithReceivePacket(recvbuf, recvbuflen);
+			memcpy(sendbuf, content.c_str(), sizeof("content.c_str()"));
 			// Echo the buffer back to the sender
 			iSendResult = send(ClientSocket, sendbuf, DEFAULT_BUFLEN, 0);
 			if (iSendResult == SOCKET_ERROR) {
@@ -136,6 +163,11 @@ int func(SOCKET ClientSocket)
 		else {
 			printf("recv failed with error: %d\n", WSAGetLastError());
 			closesocket(ClientSocket);
+			mt.lock();
+			onlineClientList.erase(thisIndex);
+			mt.unlock();
+
+			delete thisClient;
 			WSACleanup();
 			return 1;
 		}
@@ -224,11 +256,6 @@ int __cdecl main(void)
 			WSACleanup();
 			return 1;
 		}
-		//get current ip
-		/*getpeername(ClientSocket, (struct sockaddr*)&clientInfo, &addrsize);
-		char *ip = inet_ntoa(clientInfo.sin_addr);
-		printf("port: %d", clientInfo.sin_port);
-		printf("ip:%s", ip);*/
 
 		std::thread(func, std::move(ClientSocket)).detach();
 

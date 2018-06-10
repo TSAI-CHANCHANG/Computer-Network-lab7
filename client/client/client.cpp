@@ -1,5 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
 #define _CRT_SECURE_NO_WARNINGS
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #include <windows.h>
 #include <winsock2.h>
@@ -214,6 +215,17 @@ int __cdecl main(void)
 				}
 				else {
 					printf("Connection succeed!\n");
+					char *IP = NULL;
+					int port = 0;
+					//get information about this client
+					SOCKADDR_IN clientInfo = { 0 };
+					int addrsize = sizeof(clientInfo);
+					std::thread::id this_id = std::this_thread::get_id();
+					//get current ip, port
+					getpeername(ConnectSocket, (struct sockaddr*)&clientInfo, &addrsize);
+					IP = inet_ntoa(clientInfo.sin_addr);
+					port = clientInfo.sin_port;
+					std::cout << "current IP: " << IP << std::endl;
 					std::thread(func, std::move(ConnectSocket)).detach();
 					while (1) {
 						printf("Please input the operation number:\n1.close the connect\n2.get the server time\n3.get the server name\n4.get the client list\n5.send a message\n6.exit\n");

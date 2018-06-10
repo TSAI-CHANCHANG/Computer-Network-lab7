@@ -1,6 +1,7 @@
 #undef UNICODE
 #define _CRT_SECURE_NO_WARNINGS
 #define WIN32_LEAN_AND_MEAN
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #include <windows.h>
 #include <winsock2.h>
@@ -13,17 +14,82 @@
 #include <fstream>
 #include <string>
 #include <thread>
-#include <vector>
-
+#include <map>
+#include <mutex>
 // Need to link with Ws2_32.lib
 #pragma comment (lib, "Ws2_32.lib")
 #pragma comment (lib, "Mswsock.lib")
 #pragma comment (lib, "AdvApi32.lib")
 // #pragma comment (lib, "Mswsock.lib")
 
+#define SERVER_NAME "×µÃû¤Þ¤·¤í"
 #define DEFAULT_BUFLEN 512
 #define DEFAULT_PORT "5426"
+class onlineClient
+{
+private:
+	char *IP;
+	int port;
+public:
+	onlineClient(char *currentIP, int currentPort) : IP(currentIP), port(currentPort) {}
+	~onlineClient() {}
+	char *getIP()
+	{
+		return IP;
+	}
+	int getPort()
+	{
+		return port;
+	}
+};
+std::map<int, onlineClient*> onlineClientList;
+std::mutex mt;
+int currentFreeIndex = 0;
 
+bool isAlive(char *IP, int port)
+{
+	bool flag = false;
+	mt.lock();
+	std::map<int, onlineClient*>::iterator iter;
+	iter = onlineClientList.begin();
+	while (iter != onlineClientList.end())
+	{
+		if (strcmp(iter->second->getIP(), IP) == 0 &&
+			iter->second->getPort() == port)
+		{
+			flag = true;
+			break;
+		}
+		iter++;
+	}
+	mt.unlock();
+
+	if (flag)
+		return true;
+	else
+		return false;
+}
+std::string listCurrentAliveClient()
+{
+	std::string content;
+
+	mt.lock();
+	std::map<int, onlineClient*>::iterator iter;
+	iter = onlineClientList.begin();
+	while (iter != onlineClientList.end())
+	{
+		content += std::to_string(iter->first);
+		content += ' ';
+		content += iter->second->getIP();
+		content += ' ';
+		content += std::to_string(iter->second->getPort());
+		content += '\n';
+		iter++;
+	}
+	mt.unlock();
+
+	return content;
+}
 int func(SOCKET ClientSocket)
 {
 	int iSendResult;
@@ -32,6 +98,19 @@ int func(SOCKET ClientSocket)
 	int recvbuflen = DEFAULT_BUFLEN;
 	bool isShutdown = false;
 	int iResult = 0;
+	char *IP = NULL;
+	int port = 0;
+	//get information about this client
+
+	//add it to the list
+	onlineClient *thisClient = new onlineClient(IP, port);
+	int thisIndex = 0;
+	mt.lock();
+	thisIndex = currentFreeIndex;
+	onlineClientList.insert(std::make_pair(currentFreeIndex, thisClient));
+	currentFreeIndex++;
+	mt.unlock();
+	//then analysis received packet
 	while (!isShutdown)
 	{
 		iResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
@@ -63,9 +142,15 @@ int func(SOCKET ClientSocket)
 			return 1;
 		}
 	}
-	
+	//now shutdown the socket
 	iResult = shutdown(ClientSocket, SD_SEND);
 	closesocket(ClientSocket);
+	//delete the client from the list
+	mt.lock();
+	onlineClientList.erase(thisIndex);
+	mt.unlock();
+
+	delete thisClient;
 	return 0;
 }
 
@@ -134,7 +219,7 @@ int __cdecl main(void)
 		int addrsize = sizeof(clientInfo);
 		// Accept a client socket
 		SOCKET ClientSocket = INVALID_SOCKET;
-		ClientSocket = accept(ListenSocket, (struct sockaddr*)&clientInfo, &addrsize);
+		ClientSocket = accept(ListenSocket, NULL, NULL);
 		if (ClientSocket == INVALID_SOCKET) {
 			printf("accept failed with error: %d\n", WSAGetLastError());
 			closesocket(ListenSocket);
@@ -142,11 +227,10 @@ int __cdecl main(void)
 			return 1;
 		}
 		//get current ip
-		getpeername(ClientSocket, (struct sockaddr*)&clientInfo, &addrsize);
+		/*getpeername(ClientSocket, (struct sockaddr*)&clientInfo, &addrsize);
 		char *ip = inet_ntoa(clientInfo.sin_addr);
-		clientInfo.sin_port;
-
-		printf("%s", ip);
+		printf("port: %d", clientInfo.sin_port);
+		printf("ip:%s", ip);*/
 
 		std::thread(func, std::move(ClientSocket)).detach();
 

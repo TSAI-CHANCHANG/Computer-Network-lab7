@@ -81,7 +81,21 @@ packet-type: message
 response-content: Hello World!
 ```
 
+5. ERROR
 
+`request`: （冒号后带一个空格，如果内容要求为空，则不带空格）错误的包，type种类不对
+
+```c
+packet-type: dwadf
+request-content: adafsda
+```
+
+`response`：
+
+```c++
+packet-type: 5
+response-content:
+```
 
 
 

@@ -57,8 +57,15 @@ std::string dealWithReceivePacket(char recvbuf[], int recvbuflen)
 	pos = recvPacket.find(" ");
 	int nextPos = 0;
 	nextPos = recvPacket.find("\n", pos + 1);
-	packetType = recvPacket.substr(pos, nextPos - pos);
-
+	packetType = recvPacket.substr(pos + 1, nextPos - pos);
+	pos = recvPacket.find("request-content:");
+	nextPos = recvPacket.find(" ", pos);
+	if (nextPos == -1)
+		requestContent = "";
+	else
+	{
+		requestContent = recvPacket.substr(nextPos + 1);
+	}
 	return response;
 }
 bool isAlive(char *IP, int port)

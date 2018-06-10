@@ -36,8 +36,10 @@ class onlineClient
 private:
 	char *IP;
 	int port;
+	std::thread::id threadID;
+	SOCKET socket;
 public:
-	onlineClient(char *currentIP, int currentPort) : IP(currentIP), port(currentPort) {}
+	onlineClient(char *currentIP, int currentPort, std::thread::id currentID, SOCKET currentSocket) : IP(currentIP), port(currentPort), threadID(currentID), socket(currentSocket) {}
 	~onlineClient() {}
 	char *getIP()
 	{
@@ -47,21 +49,47 @@ public:
 	{
 		return port;
 	}
+	std::thread::id getThreadID()
+	{
+		return threadID;
+	}
+	SOCKET getSocket()
+	{
+		return socket;
+	}
 };
 std::map<int, onlineClient*> onlineClientList;
 std::mutex mt;
 int currentFreeIndex = 0;
-bool isAlive(char *IP, int port);
+bool isAlive(int index);
+SOCKET searchSocket(int index)
+{
+	SOCKET socket;
+	mt.lock();
+	std::map<int, onlineClient*>::iterator iter;
+	iter = onlineClientList.begin();
+	while (iter != onlineClientList.end())
+	{
+		if (iter->first == index)
+		{
+			socket = iter->second->getSocket();
+			break;
+		}
+		iter++;
+	}
+	mt.unlock();
+	return socket;
+}
 std::string listCurrentAliveClient();
-std::string dealWithReceivePacket(char recvbuf[], int recvbuflen)
+std::string dealWithReceivePacket(char recvbuf[], int recvbuflen, bool &isWaiting, int currentIndex)
 {
 	std::string recvPacket = recvbuf;
 	std::string packetType;
 	std::string requestContent;
 	std::string response;
-	int pos = 0;
+	size_t pos = 0;
 	pos = recvPacket.find(" ") + 1;
-	int nextPos = 0;
+	size_t nextPos = 0;
 	//get packet type
 	nextPos = recvPacket.find("\n", pos);
 	packetType = recvPacket.substr(pos, nextPos - pos);
@@ -92,17 +120,66 @@ std::string dealWithReceivePacket(char recvbuf[], int recvbuflen)
 		response += "packet-type: 3\nresponse-content: ";
 		response += listCurrentAliveClient();
 	}
-	else if (packetType.compare("4") == 0)//get message
+	else if (packetType.compare("4-Send") == 0)//get message
 	{
-		response += "packet-type: 4\nresponse-content: ";
+		int requestIndex;
+		std::string message;
+		//first analysis the content of packet
+		pos = recvPacket.find("request-index:");
+		nextPos = recvPacket.find(" ", pos) + 1;
+		pos = recvPacket.find("\n", nextPos);
+		requestIndex = stoi(recvPacket.substr(nextPos, pos - nextPos));
+
+		pos = recvPacket.find("message:");
+		nextPos = recvPacket.find(" ", pos) + 1;
+		message = recvPacket.substr(nextPos);
+		//second check whether the client is alive
+		if (isAlive(requestIndex))//isAlive
+		{
+			//set flag
+			isWaiting = true;
+			SOCKET socket = searchSocket(requestIndex);
+			response += "packet-type: message\nresponse-content: ";
+			response += "from: ";
+			response += std::to_string(currentIndex);
+			response += '\n';
+			response += message;
+			char sendbuf[DEFAULT_BUFLEN];
+			ZeroMemory(sendbuf, DEFAULT_BUFLEN);
+			memcpy(sendbuf, response.c_str(), response.size());
+			send(socket, sendbuf, DEFAULT_BUFLEN, 0);
+
+		}
+		else//not alive
+		{
+			response += "packet-type: 4-F-not-exist\nresponse-content:";
+		}
+
+	}
+	else if (packetType.compare("4-Receive") == 0)
+	{
+		int fromIndex;
+		isWaiting = true;
+		pos = recvPacket.find("from-index:");
+		nextPos = recvPacket.find(" ", pos) + 1;
+		pos = recvPacket.find("\n", nextPos);
+		fromIndex = stoi(recvPacket.substr(nextPos, pos - nextPos));
+		response += "packet-type: 4-S\nresponse-content: request-index: ";
+		response += std::to_string(currentIndex);
+		response += '\n';
+		response += requestContent.substr(requestContent.find("message"));
+		char sendbuf[DEFAULT_BUFLEN];
+		ZeroMemory(sendbuf, DEFAULT_BUFLEN);
+		memcpy(sendbuf, response.c_str(), response.size());
+		send(searchSocket(fromIndex), sendbuf, DEFAULT_BUFLEN, 0);
 	}
 	else//wrong
 	{
-		response += "packet-type: 5\nresponse-content: ";
+		response += "packet-type: 5\nresponse-content:";
 	}
 	return response;
 }
-bool isAlive(char *IP, int port)
+bool isAlive(int index)
 {
 	bool flag = false;
 	mt.lock();
@@ -110,8 +187,7 @@ bool isAlive(char *IP, int port)
 	iter = onlineClientList.begin();
 	while (iter != onlineClientList.end())
 	{
-		if (strcmp(iter->second->getIP(), IP) == 0 &&
-			iter->second->getPort() == port)
+		if (iter->first == index)
 		{
 			flag = true;
 			break;
@@ -159,6 +235,7 @@ int func(SOCKET ClientSocket)
 	//get information about this client
 	SOCKADDR_IN clientInfo = { 0 };
 	int addrsize = sizeof(clientInfo);
+	std::thread::id this_id = std::this_thread::get_id();
 	//get current ip, port
 	getpeername(ClientSocket, (struct sockaddr*)&clientInfo, &addrsize);
 	IP = inet_ntoa(clientInfo.sin_addr);
@@ -168,7 +245,7 @@ int func(SOCKET ClientSocket)
 	printf("ip:%s\n", IP);
 #endif
 	//add it to the list
-	onlineClient *thisClient = new onlineClient(IP, port);
+	onlineClient *thisClient = new onlineClient(IP, port, this_id, ClientSocket);
 	int thisIndex = 0;
 	mt.lock();
 	thisIndex = currentFreeIndex;
@@ -184,20 +261,24 @@ int func(SOCKET ClientSocket)
 		printf("Bytes received: %d\n", iResult);
 		printf("received content: %s\n", recvbuf);
 		if (iResult > 0) {
-			std::string content = dealWithReceivePacket(recvbuf, recvbuflen);
-			ZeroMemory(sendbuf, DEFAULT_BUFLEN);
-			memcpy(sendbuf, content.c_str(), content.size());
-			// Echo the buffer back to the sender
-			iSendResult = send(ClientSocket, sendbuf, DEFAULT_BUFLEN, 0);
-			if (iSendResult == SOCKET_ERROR) {
-				printf("send failed with error: %d\n", WSAGetLastError());
-				closesocket(ClientSocket);
-				WSACleanup();
-				return 1;
+			bool isWaiting = false;
+			std::string content = dealWithReceivePacket(recvbuf, recvbuflen, isWaiting, thisIndex);
+			if (!isWaiting) 
+			{
+				ZeroMemory(sendbuf, DEFAULT_BUFLEN);
+				memcpy(sendbuf, content.c_str(), content.size());
+				// Echo the buffer back to the sender
+				iSendResult = send(ClientSocket, sendbuf, DEFAULT_BUFLEN, 0);
+				if (iSendResult == SOCKET_ERROR) {
+					printf("send failed with error: %d\n", WSAGetLastError());
+					closesocket(ClientSocket);
+					WSACleanup();
+					return 1;
+				}
+				printf("------------------------------------\n");
+				printf("Bytes sent: %d\n", iSendResult);
+				printf("send content: %s\n", sendbuf);
 			}
-			printf("------------------------------------\n");
-			printf("Bytes sent: %d\n", iSendResult);
-			printf("send content: %s\n", sendbuf);
 		}
 		else if (iResult == 0)
 		{

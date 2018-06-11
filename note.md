@@ -60,11 +60,11 @@ request-content: request-index: 1
 message: Hello World!
 ```
 
-`request`: （成功收到消息）
+`request`: （A通过服务器给B发消息，B成功收到消息回应给服务器的消息）(from-index指的是a的index)
 
 ```c
 packet-type: 4-Receive
-request-content: request-index: 1
+request-content: from-index: 0
 message: Hello World!
 ```
 
@@ -87,7 +87,8 @@ response-content:
 
 ```c++
 packet-type: message
-response-content: Hello World!
+response-content: from: 1
+Hello World!
 ```
 
 5. ERROR

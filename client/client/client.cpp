@@ -285,11 +285,14 @@ int __cdecl main(void)
 						}
 						else if (a == 5) {
 							std::string sendMessage;
+							char buffer[1024] = "\0";
 							int dstIndex = 0;
 							std::cout << "please input the dst index:" << std::endl;
 							std::cin >> dstIndex;
+							std::cin.getline(buffer, 1024);// eat '\n'
 							std::cout << "please input the message:" << std::endl;
-							std::cin >> sendMessage;
+							std::cin.getline(buffer, 1024);
+							sendMessage = buffer;
 							std::string packet = "packet-type: 4-Send\nrequest-content: request-index: ";
 							packet += std::to_string(dstIndex);
 							packet += '\n';
